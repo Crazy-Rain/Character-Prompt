@@ -16,8 +16,14 @@
      * Load settings from the extension settings
      */
     function loadSettings() {
+        // Check if extension_settings is available
+        if (typeof extension_settings === 'undefined') {
+            console.warn('Character Prompt: extension_settings not available, deferring settings load');
+            return;
+        }
+        
         if (!extension_settings[extensionName]) {
-            extension_settings[extensionName] = defaultSettings;
+            extension_settings[extensionName] = { ...defaultSettings };
         }
         settings = extension_settings[extensionName];
         
@@ -33,14 +39,22 @@
     /**
      * Save settings to the extension settings
      */
-    function saveSettings() {
+    function saveExtensionSettings() {
         settings.enabled = $('#character_prompt_enabled').prop('checked');
         settings.characterSheet = $('#character_prompt_text').val();
         settings.injectionTarget = $('#character_prompt_target').val();
         settings.injectionPosition = $('#character_prompt_position').val();
         
-        extension_settings[extensionName] = settings;
-        saveSettingsDebounced();
+        if (typeof extension_settings !== 'undefined') {
+            extension_settings[extensionName] = settings;
+            
+            // Use saveSettingsDebounced if available, otherwise save immediately
+            if (typeof saveSettingsDebounced === 'function') {
+                saveSettingsDebounced();
+            } else if (typeof saveSettings === 'function') {
+                saveSettings();
+            }
+        }
     }
 
     /**
@@ -71,15 +85,21 @@
      */
     function injectToChatCompletionPreset(characterSheet) {
         try {
-            // Access SillyTavern's prompt building system
-            const context = getContext();
-            if (context && typeof addExtensionPrompt === 'function') {
-                const promptText = `[Character Sheet]\n${characterSheet}\n[/Character Sheet]`;
-                
-                addExtensionPrompt(extensionName, promptText, settings.injectionPosition === 'start' ? 0 : 1000, false);
+            // Check if the necessary functions are available
+            if (typeof getContext === 'function' && typeof addExtensionPrompt === 'function') {
+                const context = getContext();
+                if (context) {
+                    const promptText = `[Character Sheet]\n${characterSheet}\n[/Character Sheet]`;
+                    addExtensionPrompt(extensionName, promptText, settings.injectionPosition === 'start' ? 0 : 1000, false);
+                    return true;
+                }
             }
+            
+            console.warn('Character Prompt: getContext or addExtensionPrompt not available');
+            return false;
         } catch (error) {
             console.warn('Character Prompt: Unable to inject to chat completion preset:', error);
+            return false;
         }
     }
 
@@ -195,10 +215,10 @@
         $('#extensions_settings2').append(html);
         
         // Add event listeners
-        $('#character_prompt_enabled').on('change', saveSettings);
-        $('#character_prompt_text').on('input', saveSettings);
-        $('#character_prompt_target').on('change', saveSettings);
-        $('#character_prompt_position').on('change', saveSettings);
+        $('#character_prompt_enabled').on('change', saveExtensionSettings);
+        $('#character_prompt_text').on('input', saveExtensionSettings);
+        $('#character_prompt_target').on('change', saveExtensionSettings);
+        $('#character_prompt_position').on('change', saveExtensionSettings);
         
         // Manual injection button
         $('#character_prompt_inject').on('click', function() {
@@ -217,6 +237,11 @@
      * Initialize the extension
      */
     function init() {
+        console.log('Character Prompt extension starting initialization');
+        
+        // Ensure default settings exist
+        settings = { ...defaultSettings };
+        
         // Load settings first
         loadSettings();
         
@@ -238,15 +263,31 @@
             });
         }
         
-        // Load settings once UI is created
+        // Load settings again once UI is created
         setTimeout(loadSettings, 100);
         
-        console.log('Character Prompt extension loaded');
+        console.log('Character Prompt extension loaded successfully');
     }
 
-    // Initialize when DOM is ready
-    jQuery(document).ready(function() {
-        init();
-    });
+    /**
+     * Wait for SillyTavern to be ready, then initialize
+     */
+    function waitForSillyTavern() {
+        // Check if essential SillyTavern globals are available
+        if (typeof $ !== 'undefined' && typeof extension_settings !== 'undefined' && $('#extensions_settings2').length > 0) {
+            init();
+        } else {
+            // Wait and try again
+            console.log('Character Prompt: Waiting for SillyTavern to be ready...');
+            setTimeout(waitForSillyTavern, 500);
+        }
+    }
+
+    // Start the initialization process
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', waitForSillyTavern);
+    } else {
+        waitForSillyTavern();
+    }
 
 })();

@@ -8,5 +8,6 @@
     "author": "Crazy-Rain",
     "version": "1.0.0",
     "homePage": "https://github.com/Crazy-Rain/Character-Prompt",
-    "description": "Adds character sheet information to the LLM prompt instead of showing up in responses. Provides options to inject into Chat Completion Preset, Author's Note, or User Persona."
+    "description": "Adds character sheet information to the LLM prompt instead of showing up in responses. Provides options to inject into Chat Completion Preset, Author's Note, or User Persona.",
+    "auto_update": false
 }
