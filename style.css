@@ -35,6 +35,23 @@
     width: 100%;
 }
 
+.character-prompt-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.character-prompt-actions button {
+    flex: 1;
+    min-width: 120px;
+    padding: 8px 12px;
+    font-size: 0.9em;
+}
+
+.character-prompt-actions button i {
+    margin-right: 5px;
+}
+
 .character-prompt-help {
     color: var(--SmartThemeQuoteColor);
     font-style: italic;
@@ -64,6 +81,14 @@
     #character_prompt_text {
         min-height: 100px;
         font-size: 0.85em;
+    }
+    
+    .character-prompt-actions {
+        flex-direction: column;
+    }
+    
+    .character-prompt-actions button {
+        min-width: auto;
     }
 }
 
