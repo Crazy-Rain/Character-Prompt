@@ -16,8 +16,14 @@
      * Load settings from the extension settings
      */
     function loadSettings() {
+        // Check if extension_settings is available
+        if (typeof extension_settings === 'undefined') {
+            console.warn('Character Prompt: extension_settings not available, deferring settings load');
+            return;
+        }
+        
         if (!extension_settings[extensionName]) {
-            extension_settings[extensionName] = defaultSettings;
+            extension_settings[extensionName] = { ...defaultSettings };
         }
         settings = extension_settings[extensionName];
         
@@ -33,14 +39,22 @@
     /**
      * Save settings to the extension settings
      */
-    function saveSettings() {
+    function saveExtensionSettings() {
         settings.enabled = $('#character_prompt_enabled').prop('checked');
         settings.characterSheet = $('#character_prompt_text').val();
         settings.injectionTarget = $('#character_prompt_target').val();
         settings.injectionPosition = $('#character_prompt_position').val();
         
-        extension_settings[extensionName] = settings;
-        saveSettingsDebounced();
+        if (typeof extension_settings !== 'undefined') {
+            extension_settings[extensionName] = settings;
+            
+            // Use saveSettingsDebounced if available, otherwise save immediately
+            if (typeof saveSettingsDebounced === 'function') {
+                saveSettingsDebounced();
+            } else if (typeof saveSettings === 'function') {
+                saveSettings();
+            }
+        }
     }
 
     /**
@@ -71,15 +85,21 @@
      */
     function injectToChatCompletionPreset(characterSheet) {
         try {
-            // Access SillyTavern's prompt building system
-            const context = getContext();
-            if (context && typeof addExtensionPrompt === 'function') {
-                const promptText = `[Character Sheet]\n${characterSheet}\n[/Character Sheet]`;
-                
-                addExtensionPrompt(extensionName, promptText, settings.injectionPosition === 'start' ? 0 : 1000, false);
+            // Check if the necessary functions are available
+            if (typeof getContext === 'function' && typeof addExtensionPrompt === 'function') {
+                const context = getContext();
+                if (context) {
+                    const promptText = `[Character Sheet]\n${characterSheet}\n[/Character Sheet]`;
+                    addExtensionPrompt(extensionName, promptText, settings.injectionPosition === 'start' ? 0 : 1000, false);
+                    return true;
+                }
             }
+            
+            console.warn('Character Prompt: getContext or addExtensionPrompt not available');
+            return false;
         } catch (error) {
             console.warn('Character Prompt: Unable to inject to chat completion preset:', error);
+            return false;
         }
     }
 
@@ -192,24 +212,54 @@
             </div>
         `;
         
-        $('#extensions_settings2').append(html);
+        // Try to find the correct extensions container
+        let $container = $('#extensions_settings2');
+        if ($container.length === 0) {
+            $container = $('#extensions_settings');
+        }
+        if ($container.length === 0) {
+            $container = $('#extension_settings');
+        }
+        if ($container.length === 0) {
+            $container = $('.extensions_block');
+        }
+        if ($container.length === 0) {
+            // Fallback: try to find any element that might contain extensions
+            $container = $('[id*="extension"]').first();
+        }
+        
+        if ($container.length > 0) {
+            $container.append(html);
+            console.log('Character Prompt: UI appended to', $container.attr('id') || $container.attr('class'));
+        } else {
+            console.error('Character Prompt: Could not find extensions container to append UI');
+            return;
+        }
         
         // Add event listeners
-        $('#character_prompt_enabled').on('change', saveSettings);
-        $('#character_prompt_text').on('input', saveSettings);
-        $('#character_prompt_target').on('change', saveSettings);
-        $('#character_prompt_position').on('change', saveSettings);
+        $('#character_prompt_enabled').on('change', saveExtensionSettings);
+        $('#character_prompt_text').on('input', saveExtensionSettings);
+        $('#character_prompt_target').on('change', saveExtensionSettings);
+        $('#character_prompt_position').on('change', saveExtensionSettings);
         
         // Manual injection button
         $('#character_prompt_inject').on('click', function() {
             injectCharacterSheet();
-            toastr.success('Character sheet injected successfully!', 'Character Prompt');
+            if (typeof toastr !== 'undefined') {
+                toastr.success('Character sheet injected successfully!', 'Character Prompt');
+            } else {
+                console.log('Character Prompt: Character sheet injected successfully!');
+            }
         });
         
         // Clear button
         $('#character_prompt_clear').on('click', function() {
             $('#character_prompt_text').val('').trigger('input');
-            toastr.info('Character sheet cleared', 'Character Prompt');
+            if (typeof toastr !== 'undefined') {
+                toastr.info('Character sheet cleared', 'Character Prompt');
+            } else {
+                console.log('Character Prompt: Character sheet cleared');
+            }
         });
     }
 
@@ -217,6 +267,11 @@
      * Initialize the extension
      */
     function init() {
+        console.log('Character Prompt extension starting initialization');
+        
+        // Ensure default settings exist
+        settings = { ...defaultSettings };
+        
         // Load settings first
         loadSettings();
         
@@ -238,15 +293,71 @@
             });
         }
         
-        // Load settings once UI is created
+        // Load settings again once UI is created
         setTimeout(loadSettings, 100);
         
-        console.log('Character Prompt extension loaded');
+        console.log('Character Prompt extension loaded successfully');
     }
 
-    // Initialize when DOM is ready
-    jQuery(document).ready(function() {
-        init();
-    });
+    /**
+     * Wait for SillyTavern to be ready, then initialize
+     */
+    function waitForSillyTavern() {
+        // Check if essential SillyTavern globals are available
+        const essentialElementExists = $('#extensions_settings2').length > 0 || 
+                                      $('#extensions_settings').length > 0 ||
+                                      $('#extension_settings').length > 0 ||
+                                      $('.extensions_block').length > 0;
+        
+        if (typeof $ !== 'undefined' && 
+            typeof extension_settings !== 'undefined' && 
+            essentialElementExists &&
+            typeof jQuery !== 'undefined') {
+            
+            console.log('Character Prompt: SillyTavern ready, initializing extension');
+            init();
+        } else {
+            // Wait and try again
+            console.log('Character Prompt: Waiting for SillyTavern to be ready...');
+            setTimeout(waitForSillyTavern, 1000);
+        }
+    }
+
+    // Multiple initialization approaches to ensure compatibility
+    
+    // Approach 1: jQuery ready (most common in older SillyTavern versions)
+    if (typeof jQuery !== 'undefined') {
+        jQuery(document).ready(function() {
+            // Small delay to ensure SillyTavern has time to initialize
+            setTimeout(waitForSillyTavern, 2000);
+        });
+    }
+    
+    // Approach 2: DOM ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(waitForSillyTavern, 2000);
+        });
+    } else {
+        // DOM already ready
+        setTimeout(waitForSillyTavern, 2000);
+    }
+    
+    // Approach 3: Window load (fallback)
+    if (typeof window !== 'undefined') {
+        window.addEventListener('load', function() {
+            setTimeout(waitForSillyTavern, 3000);
+        });
+    }
+
+    // Export for potential module system usage
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = { init: waitForSillyTavern };
+    }
+
+    // Also try to register with window for global access
+    if (typeof window !== 'undefined') {
+        window.characterPromptExtension = { init: waitForSillyTavern };
+    }
 
 })();
