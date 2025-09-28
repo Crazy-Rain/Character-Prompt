@@ -1,117 +1,295 @@
-(function() {
+(() => {
     'use strict';
-    
+
+    // Extension configuration
     const extensionName = 'character-prompt';
+    const settingsKey = 'character_prompt_settings';
+    
+    // Default settings
     const defaultSettings = {
         enabled: true,
         characterSheet: '',
-        injectionTarget: 'chat_completion_preset', // 'chat_completion_preset', 'authors_note', 'user_persona'
-        injectionPosition: 'end' // 'start', 'end'
+        injectionTarget: 'chat_completion_preset',
+        injectionPosition: 'end',
+        collapsed: false
     };
 
-    // Extension settings
-    let settings = {};
+    let settings = { ...defaultSettings };
 
-    /**
-     * Load settings from the extension settings
-     */
+    // Load settings from localStorage
     function loadSettings() {
-        // Check if extension_settings is available
-        if (typeof extension_settings === 'undefined') {
-            console.warn('Character Prompt: extension_settings not available, deferring settings load');
-            return;
-        }
-        
-        if (!extension_settings[extensionName]) {
-            extension_settings[extensionName] = { ...defaultSettings };
-        }
-        settings = extension_settings[extensionName];
-        
-        // Update UI elements if they exist
-        if ($('#character_prompt_enabled').length) {
-            $('#character_prompt_enabled').prop('checked', settings.enabled);
-            $('#character_prompt_text').val(settings.characterSheet);
-            $('#character_prompt_target').val(settings.injectionTarget);
-            $('#character_prompt_position').val(settings.injectionPosition);
-        }
-    }
-
-    /**
-     * Save settings to the extension settings
-     */
-    function saveExtensionSettings() {
-        settings.enabled = $('#character_prompt_enabled').prop('checked');
-        settings.characterSheet = $('#character_prompt_text').val();
-        settings.injectionTarget = $('#character_prompt_target').val();
-        settings.injectionPosition = $('#character_prompt_position').val();
-        
-        if (typeof extension_settings !== 'undefined') {
-            extension_settings[extensionName] = settings;
-            
-            // Use saveSettingsDebounced if available, otherwise save immediately
-            if (typeof saveSettingsDebounced === 'function') {
-                saveSettingsDebounced();
-            } else if (typeof saveSettings === 'function') {
-                saveSettings();
+        try {
+            const saved = localStorage.getItem(settingsKey);
+            if (saved) {
+                settings = { ...defaultSettings, ...JSON.parse(saved) };
             }
+        } catch (error) {
+            console.error('[Character Prompt] Error loading settings:', error);
         }
     }
 
-    /**
-     * Inject character sheet into the appropriate target
-     */
+    // Save settings to localStorage
+    function saveSettings() {
+        try {
+            localStorage.setItem(settingsKey, JSON.stringify(settings));
+        } catch (error) {
+            console.error('[Character Prompt] Error saving settings:', error);
+        }
+    }
+
+    // Create the extension UI
+    function createUI() {
+        const container = document.createElement('div');
+        container.className = `character-prompt-container inline-drawer ${settings.collapsed ? 'collapsed' : ''}`;
+        container.innerHTML = `
+            <div class="inline-drawer-toggle inline-drawer-header character-prompt-header">
+                <div class="character-prompt-title">
+                    <button class="character-prompt-collapse-btn" id="character-prompt-collapse">
+                        <span class="collapse-icon">${settings.collapsed ? '▶' : '▼'}</span>
+                    </button>
+                    <b>Character Prompt</b>
+                </div>
+                <div class="character-prompt-toggle">
+                    <label for="character-prompt-enabled">Enabled:</label>
+                    <input type="checkbox" id="character-prompt-enabled" ${settings.enabled ? 'checked' : ''}>
+                </div>
+            </div>
+            <div class="inline-drawer-content character-prompt-content" ${settings.collapsed ? 'style="display: none;"' : ''}>
+                <div class="character-prompt-settings">
+                    <div class="character-prompt-row">
+                        <label for="character-prompt-target">Injection Target:</label>
+                        <select id="character-prompt-target" class="text_pole">
+                            <option value="chat_completion_preset" ${settings.injectionTarget === 'chat_completion_preset' ? 'selected' : ''}>Chat Completion Preset</option>
+                            <option value="authors_note" ${settings.injectionTarget === 'authors_note' ? 'selected' : ''}>Author's Note</option>
+                            <option value="user_persona" ${settings.injectionTarget === 'user_persona' ? 'selected' : ''}>User Persona</option>
+                        </select>
+                    </div>
+                    <div class="character-prompt-row">
+                        <label for="character-prompt-position">Injection Position:</label>
+                        <select id="character-prompt-position" class="text_pole">
+                            <option value="start" ${settings.injectionPosition === 'start' ? 'selected' : ''}>Beginning</option>
+                            <option value="end" ${settings.injectionPosition === 'end' ? 'selected' : ''}>End</option>
+                        </select>
+                    </div>
+                </div>
+                <textarea 
+                    id="character-prompt-textarea" 
+                    class="character-prompt-textarea text_pole textarea_compact" 
+                    placeholder="Enter your character sheet information here...
+
+Example:
+Name: Detective Sarah Chen
+Age: 32
+Occupation: Homicide Detective
+Personality: Analytical, determined, empathetic but guarded"
+                    rows="8"
+                >${settings.characterSheet}</textarea>
+                <div class="character-prompt-actions">
+                    <button id="character-prompt-inject" class="menu_button">
+                        <i class="fa-solid fa-arrow-right"></i>
+                        Inject Now
+                    </button>
+                    <button id="character-prompt-clear" class="menu_button">
+                        <i class="fa-solid fa-trash"></i>
+                        Clear Sheet
+                    </button>
+                </div>
+                <div class="character-prompt-info">
+                    <span id="character-prompt-status">Ready</span> • 
+                    <span id="character-prompt-count">0 characters</span>
+                </div>
+                <small class="character-prompt-help">
+                    This character sheet will be injected into the selected target location to provide context to the LLM.
+                    Use "Inject Now" to manually apply, or enable auto-injection for new messages.
+                </small>
+            </div>
+        `;
+
+        return container;
+    }
+
+    // Update settings when UI changes
+    function bindUIEvents() {
+        const enableToggle = document.getElementById('character-prompt-enabled');
+        const sheetTextarea = document.getElementById('character-prompt-textarea');
+        const targetSelect = document.getElementById('character-prompt-target');
+        const positionSelect = document.getElementById('character-prompt-position');
+        const statusElement = document.getElementById('character-prompt-status');
+        const countElement = document.getElementById('character-prompt-count');
+        const collapseButton = document.getElementById('character-prompt-collapse');
+        const contentArea = document.querySelector('.character-prompt-content');
+        const container = document.querySelector('.character-prompt-container');
+        const injectButton = document.getElementById('character-prompt-inject');
+        const clearButton = document.getElementById('character-prompt-clear');
+
+        // Update character count
+        const updateCount = () => {
+            if (countElement && sheetTextarea) {
+                const count = sheetTextarea.value.length;
+                countElement.textContent = `${count} characters`;
+            }
+        };
+
+        // Update status
+        const updateStatus = () => {
+            if (statusElement) {
+                const hasContent = settings.characterSheet.trim().length > 0;
+                const status = settings.enabled 
+                    ? (hasContent ? 'Active' : 'Enabled (no content)')
+                    : 'Disabled';
+                statusElement.textContent = status;
+                statusElement.style.color = settings.enabled && hasContent ? '#4CAF50' : 
+                                          settings.enabled ? '#FF9800' : '#666';
+            }
+        };
+
+        // Handle collapse/expand
+        if (collapseButton && contentArea && container) {
+            collapseButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                settings.collapsed = !settings.collapsed;
+                saveSettings();
+                
+                // Update UI
+                if (settings.collapsed) {
+                    contentArea.style.display = 'none';
+                    container.classList.add('collapsed');
+                    collapseButton.querySelector('.collapse-icon').textContent = '▶';
+                } else {
+                    contentArea.style.display = 'block';
+                    container.classList.remove('collapsed');
+                    collapseButton.querySelector('.collapse-icon').textContent = '▼';
+                }
+                
+                console.log(`[Character Prompt] Extension ${settings.collapsed ? 'collapsed' : 'expanded'}`);
+            });
+        }
+
+        if (enableToggle) {
+            enableToggle.addEventListener('change', (e) => {
+                settings.enabled = e.target.checked;
+                saveSettings();
+                updateStatus();
+                console.log(`[Character Prompt] Extension ${settings.enabled ? 'enabled' : 'disabled'}`);
+            });
+        }
+
+        if (sheetTextarea) {
+            sheetTextarea.addEventListener('input', (e) => {
+                settings.characterSheet = e.target.value;
+                saveSettings();
+                updateCount();
+                updateStatus();
+            });
+            
+            // Initial updates
+            updateCount();
+        }
+
+        if (targetSelect) {
+            targetSelect.addEventListener('change', (e) => {
+                settings.injectionTarget = e.target.value;
+                saveSettings();
+                console.log(`[Character Prompt] Injection target changed to: ${settings.injectionTarget}`);
+            });
+        }
+
+        if (positionSelect) {
+            positionSelect.addEventListener('change', (e) => {
+                settings.injectionPosition = e.target.value;
+                saveSettings();
+                console.log(`[Character Prompt] Injection position changed to: ${settings.injectionPosition}`);
+            });
+        }
+
+        if (injectButton) {
+            injectButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                injectCharacterSheet();
+                if (typeof toastr !== 'undefined') {
+                    toastr.success('Character sheet injected successfully!', 'Character Prompt');
+                } else {
+                    console.log('[Character Prompt] Character sheet injected successfully!');
+                }
+            });
+        }
+
+        if (clearButton) {
+            clearButton.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (sheetTextarea) {
+                    sheetTextarea.value = '';
+                    settings.characterSheet = '';
+                    saveSettings();
+                    updateCount();
+                    updateStatus();
+                }
+                if (typeof toastr !== 'undefined') {
+                    toastr.info('Character sheet cleared', 'Character Prompt');
+                } else {
+                    console.log('[Character Prompt] Character sheet cleared');
+                }
+            });
+        }
+        
+        updateStatus();
+    }
+
+    // Inject character sheet into the appropriate target
     function injectCharacterSheet() {
         if (!settings.enabled || !settings.characterSheet.trim()) {
+            console.log('[Character Prompt] Extension disabled or no content to inject');
             return;
         }
 
         const characterSheet = settings.characterSheet.trim();
+        const characterPrompt = `[Character Sheet]\n${characterSheet}\n[/Character Sheet]`;
         
         switch (settings.injectionTarget) {
             case 'chat_completion_preset':
-                injectToChatCompletionPreset(characterSheet);
+                injectToChatCompletionPreset(characterPrompt);
                 break;
             case 'authors_note':
-                injectToAuthorsNote(characterSheet);
+                injectToAuthorsNote(characterPrompt);
                 break;
             case 'user_persona':
-                injectToUserPersona(characterSheet);
+                injectToUserPersona(characterPrompt);
                 break;
+            default:
+                console.warn('[Character Prompt] Unknown injection target:', settings.injectionTarget);
         }
     }
 
-    /**
-     * Inject to Chat Completion Preset
-     */
-    function injectToChatCompletionPreset(characterSheet) {
+    // Inject to Chat Completion Preset using SillyTavern's extension prompt system
+    function injectToChatCompletionPreset(characterPrompt) {
         try {
             // Check if the necessary functions are available
             if (typeof getContext === 'function' && typeof addExtensionPrompt === 'function') {
                 const context = getContext();
                 if (context) {
-                    const promptText = `[Character Sheet]\n${characterSheet}\n[/Character Sheet]`;
-                    addExtensionPrompt(extensionName, promptText, settings.injectionPosition === 'start' ? 0 : 1000, false);
+                    const priority = settings.injectionPosition === 'start' ? 0 : 1000;
+                    addExtensionPrompt(extensionName, characterPrompt, priority, false);
+                    console.log('[Character Prompt] Injected to chat completion preset');
                     return true;
                 }
             }
             
-            console.warn('Character Prompt: getContext or addExtensionPrompt not available');
+            console.warn('[Character Prompt] getContext or addExtensionPrompt not available');
             return false;
         } catch (error) {
-            console.warn('Character Prompt: Unable to inject to chat completion preset:', error);
+            console.warn('[Character Prompt] Unable to inject to chat completion preset:', error);
             return false;
         }
     }
 
-    /**
-     * Inject to Author's Note
-     */
-    function injectToAuthorsNote(characterSheet) {
+    // Inject to Author's Note
+    function injectToAuthorsNote(characterPrompt) {
         try {
-            const authorsNoteTextarea = $('#extension_floating_prompt');
-            if (authorsNoteTextarea.length) {
-                const currentValue = authorsNoteTextarea.val() || '';
-                const characterPrompt = `[Character Sheet]\n${characterSheet}\n[/Character Sheet]`;
+            const authorsNoteTextarea = document.getElementById('extension_floating_prompt') || 
+                                      document.querySelector('#extension_floating_prompt') ||
+                                      document.querySelector('.floating_prompt_text');
+            if (authorsNoteTextarea) {
+                const currentValue = authorsNoteTextarea.value || '';
                 
                 let newValue;
                 if (settings.injectionPosition === 'start') {
@@ -120,22 +298,24 @@
                     newValue = currentValue + '\n\n' + characterPrompt;
                 }
                 
-                authorsNoteTextarea.val(newValue.trim());
+                authorsNoteTextarea.value = newValue.trim();
+                console.log('[Character Prompt] Injected to author\'s note');
+            } else {
+                console.warn('[Character Prompt] Author\'s note textarea not found');
             }
         } catch (error) {
-            console.warn('Character Prompt: Unable to inject to authors note:', error);
+            console.warn('[Character Prompt] Unable to inject to author\'s note:', error);
         }
     }
 
-    /**
-     * Inject to User Persona
-     */
-    function injectToUserPersona(characterSheet) {
+    // Inject to User Persona
+    function injectToUserPersona(characterPrompt) {
         try {
-            const userPersonaTextarea = $('#persona_description');
-            if (userPersonaTextarea.length) {
-                const currentValue = userPersonaTextarea.val() || '';
-                const characterPrompt = `[Character Sheet]\n${characterSheet}\n[/Character Sheet]`;
+            const userPersonaTextarea = document.getElementById('persona_description') ||
+                                      document.querySelector('#persona_description') ||
+                                      document.querySelector('.persona_description');
+            if (userPersonaTextarea) {
+                const currentValue = userPersonaTextarea.value || '';
                 
                 let newValue;
                 if (settings.injectionPosition === 'start') {
@@ -144,220 +324,96 @@
                     newValue = currentValue + '\n\n' + characterPrompt;
                 }
                 
-                userPersonaTextarea.val(newValue.trim());
+                userPersonaTextarea.value = newValue.trim();
+                console.log('[Character Prompt] Injected to user persona');
+            } else {
+                console.warn('[Character Prompt] User persona textarea not found');
             }
         } catch (error) {
-            console.warn('Character Prompt: Unable to inject to user persona:', error);
+            console.warn('[Character Prompt] Unable to inject to user persona:', error);
         }
     }
 
-    /**
-     * Create the extension UI
-     */
-    function createUI() {
-        const html = `
-            <div id="character_prompt_container" class="inline-drawer">
-                <div class="inline-drawer-toggle inline-drawer-header">
-                    <b>Character Prompt</b>
-                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-                </div>
-                <div class="inline-drawer-content">
-                    <div class="character-prompt-settings">
-                        <label class="checkbox_label" for="character_prompt_enabled">
-                            <input type="checkbox" id="character_prompt_enabled" />
-                            <span>Enable Character Prompt</span>
-                        </label>
-                        
-                        <div class="character-prompt-group">
-                            <label for="character_prompt_target">Injection Target:</label>
-                            <select id="character_prompt_target" class="text_pole">
-                                <option value="chat_completion_preset">Chat Completion Preset</option>
-                                <option value="authors_note">Author's Note</option>
-                                <option value="user_persona">User Persona</option>
-                            </select>
-                        </div>
-                        
-                        <div class="character-prompt-group">
-                            <label for="character_prompt_position">Injection Position:</label>
-                            <select id="character_prompt_position" class="text_pole">
-                                <option value="start">Beginning</option>
-                                <option value="end">End</option>
-                            </select>
-                        </div>
-                        
-                        <div class="character-prompt-group">
-                            <label for="character_prompt_text">Character Sheet:</label>
-                            <textarea id="character_prompt_text" class="text_pole textarea_compact" 
-                                      placeholder="Enter your character sheet information here...&#10;&#10;Example:&#10;Name: John Doe&#10;Age: 25&#10;Occupation: Detective&#10;Personality: Analytical, determined, empathetic"
-                                      rows="8"></textarea>
-                        </div>
-                        
-                        <div class="character-prompt-actions">
-                            <button id="character_prompt_inject" class="menu_button" type="button">
-                                <i class="fa-solid fa-arrow-right"></i>
-                                Inject Now
-                            </button>
-                            <button id="character_prompt_clear" class="menu_button" type="button">
-                                <i class="fa-solid fa-trash"></i>
-                                Clear Sheet
-                            </button>
-                        </div>
-                        
-                        <small class="character-prompt-help">
-                            This character sheet will be injected into the selected target location to provide context to the LLM.
-                            Use "Inject Now" to manually apply, or enable auto-injection for new messages.
-                        </small>
-                    </div>
-                </div>
-            </div>
-        `;
-        
-        // Try to find the correct extensions container
-        let $container = $('#extensions_settings2');
-        if ($container.length === 0) {
-            $container = $('#extensions_settings');
-        }
-        if ($container.length === 0) {
-            $container = $('#extension_settings');
-        }
-        if ($container.length === 0) {
-            $container = $('.extensions_block');
-        }
-        if ($container.length === 0) {
-            // Fallback: try to find any element that might contain extensions
-            $container = $('[id*="extension"]').first();
-        }
-        
-        if ($container.length > 0) {
-            $container.append(html);
-            console.log('Character Prompt: UI appended to', $container.attr('id') || $container.attr('class'));
-        } else {
-            console.error('Character Prompt: Could not find extensions container to append UI');
-            return;
-        }
-        
-        // Add event listeners
-        $('#character_prompt_enabled').on('change', saveExtensionSettings);
-        $('#character_prompt_text').on('input', saveExtensionSettings);
-        $('#character_prompt_target').on('change', saveExtensionSettings);
-        $('#character_prompt_position').on('change', saveExtensionSettings);
-        
-        // Manual injection button
-        $('#character_prompt_inject').on('click', function() {
-            injectCharacterSheet();
-            if (typeof toastr !== 'undefined') {
-                toastr.success('Character sheet injected successfully!', 'Character Prompt');
-            } else {
-                console.log('Character Prompt: Character sheet injected successfully!');
-            }
-        });
-        
-        // Clear button
-        $('#character_prompt_clear').on('click', function() {
-            $('#character_prompt_text').val('').trigger('input');
-            if (typeof toastr !== 'undefined') {
-                toastr.info('Character sheet cleared', 'Character Prompt');
-            } else {
-                console.log('Character Prompt: Character sheet cleared');
-            }
-        });
-    }
-
-    /**
-     * Initialize the extension
-     */
+    // Initialize the extension
     function init() {
-        console.log('Character Prompt extension starting initialization');
+        console.log('[Character Prompt] Extension initializing...');
         
-        // Ensure default settings exist
-        settings = { ...defaultSettings };
-        
-        // Load settings first
         loadSettings();
         
-        // Create UI
-        createUI();
-        
-        // Hook into message generation events if available
-        if (typeof eventSource !== 'undefined' && typeof event_types !== 'undefined') {
-            eventSource.on(event_types.CHAT_CHANGED, () => {
-                if (settings.enabled) {
-                    injectCharacterSheet();
-                }
-            });
+        // Find the best place to add our UI
+        const findUILocation = () => {
+            // Try to find extensions settings area
+            let targetElement = document.querySelector('#extensions_settings') ||
+                              document.querySelector('#extensions_settings2') ||
+                              document.querySelector('.extensions_settings') ||
+                              document.querySelector('#third-party-extensions') ||
+                              document.querySelector('.third-party-extensions');
             
-            eventSource.on(event_types.MESSAGE_SENT, () => {
-                if (settings.enabled) {
-                    injectCharacterSheet();
-                }
-            });
+            // If no extensions area, try right panel areas
+            if (!targetElement) {
+                targetElement = document.querySelector('#right-nav-panel') ||
+                              document.querySelector('#rightSendForm') ||
+                              document.querySelector('.drawer-content');
+            }
+            
+            return targetElement;
+        };
+
+        // Try to add UI
+        const addUI = () => {
+            const targetElement = findUILocation();
+            if (targetElement && !document.querySelector('.character-prompt-container')) {
+                const ui = createUI();
+                targetElement.appendChild(ui);
+                bindUIEvents();
+                console.log('[Character Prompt] UI added successfully');
+                return true;
+            }
+            return false;
+        };
+
+        // Try immediately
+        if (addUI()) {
+            console.log('[Character Prompt] Extension initialized successfully');
+            return;
         }
-        
-        // Load settings again once UI is created
-        setTimeout(loadSettings, 100);
-        
-        console.log('Character Prompt extension loaded successfully');
+
+        // If immediate attempt failed, try with delays
+        const retryInit = () => {
+            let attempts = 0;
+            const maxAttempts = 10;
+            
+            const tryAgain = () => {
+                attempts++;
+                if (addUI()) {
+                    console.log(`[Character Prompt] Extension initialized successfully after ${attempts} attempts`);
+                } else if (attempts < maxAttempts) {
+                    setTimeout(tryAgain, 2000);
+                } else {
+                    console.warn('[Character Prompt] Failed to initialize after maximum attempts');
+                }
+            };
+            
+            setTimeout(tryAgain, 1000);
+        };
+
+        retryInit();
     }
 
-    /**
-     * Wait for SillyTavern to be ready, then initialize
-     */
-    function waitForSillyTavern() {
-        // Check if essential SillyTavern globals are available
-        const essentialElementExists = $('#extensions_settings2').length > 0 || 
-                                      $('#extensions_settings').length > 0 ||
-                                      $('#extension_settings').length > 0 ||
-                                      $('.extensions_block').length > 0;
-        
-        if (typeof $ !== 'undefined' && 
-            typeof extension_settings !== 'undefined' && 
-            essentialElementExists &&
-            typeof jQuery !== 'undefined') {
-            
-            console.log('Character Prompt: SillyTavern ready, initializing extension');
-            init();
-        } else {
-            // Wait and try again
-            console.log('Character Prompt: Waiting for SillyTavern to be ready...');
-            setTimeout(waitForSillyTavern, 1000);
-        }
-    }
-
-    // Multiple initialization approaches to ensure compatibility
-    
-    // Approach 1: jQuery ready (most common in older SillyTavern versions)
-    if (typeof jQuery !== 'undefined') {
-        jQuery(document).ready(function() {
-            // Small delay to ensure SillyTavern has time to initialize
-            setTimeout(waitForSillyTavern, 2000);
-        });
-    }
-    
-    // Approach 2: DOM ready
+    // Wait for DOM to be ready, then initialize
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-            setTimeout(waitForSillyTavern, 2000);
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(init, 2000);
         });
     } else {
-        // DOM already ready
-        setTimeout(waitForSillyTavern, 2000);
+        // If document is already loaded, wait a bit for SillyTavern to initialize
+        setTimeout(init, 2000);
     }
-    
-    // Approach 3: Window load (fallback)
-    if (typeof window !== 'undefined') {
-        window.addEventListener('load', function() {
-            setTimeout(waitForSillyTavern, 3000);
+
+    // Alternative initialization approach for jQuery compatibility
+    if (typeof jQuery !== 'undefined') {
+        jQuery(document).ready(() => {
+            setTimeout(init, 3000);
         });
     }
-
-    // Export for potential module system usage
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = { init: waitForSillyTavern };
-    }
-
-    // Also try to register with window for global access
-    if (typeof window !== 'undefined') {
-        window.characterPromptExtension = { init: waitForSillyTavern };
-    }
-
 })();
