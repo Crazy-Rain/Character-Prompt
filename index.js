@@ -212,7 +212,29 @@
             </div>
         `;
         
-        $('#extensions_settings2').append(html);
+        // Try to find the correct extensions container
+        let $container = $('#extensions_settings2');
+        if ($container.length === 0) {
+            $container = $('#extensions_settings');
+        }
+        if ($container.length === 0) {
+            $container = $('#extension_settings');
+        }
+        if ($container.length === 0) {
+            $container = $('.extensions_block');
+        }
+        if ($container.length === 0) {
+            // Fallback: try to find any element that might contain extensions
+            $container = $('[id*="extension"]').first();
+        }
+        
+        if ($container.length > 0) {
+            $container.append(html);
+            console.log('Character Prompt: UI appended to', $container.attr('id') || $container.attr('class'));
+        } else {
+            console.error('Character Prompt: Could not find extensions container to append UI');
+            return;
+        }
         
         // Add event listeners
         $('#character_prompt_enabled').on('change', saveExtensionSettings);
@@ -274,20 +296,60 @@
      */
     function waitForSillyTavern() {
         // Check if essential SillyTavern globals are available
-        if (typeof $ !== 'undefined' && typeof extension_settings !== 'undefined' && $('#extensions_settings2').length > 0) {
+        const essentialElementExists = $('#extensions_settings2').length > 0 || 
+                                      $('#extensions_settings').length > 0 ||
+                                      $('#extension_settings').length > 0 ||
+                                      $('.extensions_block').length > 0;
+        
+        if (typeof $ !== 'undefined' && 
+            typeof extension_settings !== 'undefined' && 
+            essentialElementExists &&
+            typeof jQuery !== 'undefined') {
+            
+            console.log('Character Prompt: SillyTavern ready, initializing extension');
             init();
         } else {
             // Wait and try again
             console.log('Character Prompt: Waiting for SillyTavern to be ready...');
-            setTimeout(waitForSillyTavern, 500);
+            setTimeout(waitForSillyTavern, 1000);
         }
     }
 
-    // Start the initialization process
+    // Multiple initialization approaches to ensure compatibility
+    
+    // Approach 1: jQuery ready (most common in older SillyTavern versions)
+    if (typeof jQuery !== 'undefined') {
+        jQuery(document).ready(function() {
+            // Small delay to ensure SillyTavern has time to initialize
+            setTimeout(waitForSillyTavern, 2000);
+        });
+    }
+    
+    // Approach 2: DOM ready
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', waitForSillyTavern);
+        document.addEventListener('DOMContentLoaded', function() {
+            setTimeout(waitForSillyTavern, 2000);
+        });
     } else {
-        waitForSillyTavern();
+        // DOM already ready
+        setTimeout(waitForSillyTavern, 2000);
+    }
+    
+    // Approach 3: Window load (fallback)
+    if (typeof window !== 'undefined') {
+        window.addEventListener('load', function() {
+            setTimeout(waitForSillyTavern, 3000);
+        });
+    }
+
+    // Export for potential module system usage
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = { init: waitForSillyTavern };
+    }
+
+    // Also try to register with window for global access
+    if (typeof window !== 'undefined') {
+        window.characterPromptExtension = { init: waitForSillyTavern };
     }
 
 })();
