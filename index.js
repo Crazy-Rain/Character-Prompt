@@ -245,13 +245,21 @@
         // Manual injection button
         $('#character_prompt_inject').on('click', function() {
             injectCharacterSheet();
-            toastr.success('Character sheet injected successfully!', 'Character Prompt');
+            if (typeof toastr !== 'undefined') {
+                toastr.success('Character sheet injected successfully!', 'Character Prompt');
+            } else {
+                console.log('Character Prompt: Character sheet injected successfully!');
+            }
         });
         
         // Clear button
         $('#character_prompt_clear').on('click', function() {
             $('#character_prompt_text').val('').trigger('input');
-            toastr.info('Character sheet cleared', 'Character Prompt');
+            if (typeof toastr !== 'undefined') {
+                toastr.info('Character sheet cleared', 'Character Prompt');
+            } else {
+                console.log('Character Prompt: Character sheet cleared');
+            }
         });
     }
 
